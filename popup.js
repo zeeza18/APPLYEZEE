@@ -183,13 +183,12 @@ function wireStep1() {
 async function prefillStep2() {
   const c = await chrome.storage.sync.get([
     'filterKeywords','yearsOfExperience','expectedSalary',
-    'visaSponsorship','legallyAuthorized','filterRemote','filterExp','applyLimit'
+    'visaSponsorship','legallyAuthorized','filterRemote','filterExp'
   ]);
   const local = await chrome.storage.local.get(['resumeFileName']);
 
   setVal('s2-filterKeywords', c.filterKeywords);
   setVal('s2-yearsOfExperience', c.yearsOfExperience || '2');
-  setVal('s2-applyLimit', c.applyLimit || '2');
   setVal('s2-expectedSalary', c.expectedSalary);
   setVal('s2-visaSponsorship', c.visaSponsorship || 'no');
   setVal('s2-legallyAuthorized', c.legallyAuthorized || 'yes');
@@ -230,7 +229,6 @@ function wireStep2() {
       legallyAuthorized: getVal('s2-legallyAuthorized'),
       filterRemote:      getChecked('s2-remote'),
       filterExp:         getChecked('s2-exp'),
-      applyLimit:        getVal('s2-applyLimit') || '2',
     });
     await chrome.storage.local.set({ onboardingStep: 2 });
 
@@ -241,23 +239,23 @@ function wireStep2() {
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────
 async function initMain() {
-  const local = await chrome.storage.local.get(['isRunning', 'appliedCount', 'skippedCount']);
+  const local = await chrome.storage.local.get(['isRunning', 'appliedCount']);
   isRunning = local.isRunning || false;
   updateButtons();
   updateStatusDisplay(isRunning ? 'Running' : 'Stopped', isRunning);
 
   const ac = $('applied-count');
-  const sc = $('skipped-count');
   if (ac) ac.textContent = local.appliedCount || 0;
-  if (sc) sc.textContent = local.skippedCount || 0;
 
+  refreshAppliedList();
   updateDownloadSection();
 
-  // Poll counters every 2s
+  // Poll counter + applied list every 2s
   setInterval(async () => {
-    const l = await chrome.storage.local.get(['appliedCount','skippedCount']);
+    const l = await chrome.storage.local.get(['appliedCount', 'appliedJobs']);
     if (ac) ac.textContent = l.appliedCount || 0;
-    if (sc) sc.textContent = l.skippedCount || 0;
+    const listEl = $('applied-jobs-list');
+    if (listEl && (l.appliedJobs || []).length) refreshAppliedList();
   }, 2000);
 }
 
@@ -517,25 +515,54 @@ function wireMainButtons() {
   });
 
   // ── RUNTIME MESSAGES from content script ──
+  let timerInterval = null;
+
   chrome.runtime.onMessage.addListener((req) => {
     if (req.type === 'updateCount') {
       const el = $('applied-count');
-      if (el) el.textContent = req.count;
-    } else if (req.type === 'updateSkippedCount') {
-      const el = $('skipped-count');
-      if (el) el.textContent = req.count;
+      if (el) el.textContent = req.applied || 0;
+      refreshAppliedList();
+    } else if (req.type === 'timer') {
+      let secs = req.seconds;
+      const timerEl = $('timer-count');
+      const timerLbl = $('timer-label');
+      if (timerLbl) timerLbl.textContent = req.label || 'Next in';
+      if (timerEl) timerEl.textContent = `${secs}s`;
+      clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        secs--;
+        if (timerEl) timerEl.textContent = secs > 0 ? `${secs}s` : '—';
+        if (secs <= 0) clearInterval(timerInterval);
+      }, 1000);
     } else if (req.type === 'botStarted') {
       isRunning = true;
       updateButtons();
       updateStatusDisplay('Running', true);
       updateDownloadSection();
-    } else if (req.type === 'botStopped') {
+    } else if (req.type === 'botStopped' || req.type === 'updateStatus' && req.status === 'stopped') {
       isRunning = false;
       updateButtons();
       updateStatusDisplay('Stopped', false);
       updateDownloadSection();
+      const timerEl = $('timer-count');
+      if (timerEl) timerEl.textContent = '—';
+      clearInterval(timerInterval);
+      refreshAppliedList();
     }
   });
+}
+
+async function refreshAppliedList() {
+  const el = $('applied-jobs-list');
+  if (!el) return;
+  const { appliedJobs = [] } = await chrome.storage.local.get(['appliedJobs']);
+  if (!appliedJobs.length) { el.innerHTML = ''; return; }
+  el.innerHTML = appliedJobs.slice().reverse().map(j =>
+    `<div class="applied-job-item">
+      <span class="aj-title">${j.title || 'Unknown'}</span>
+      <span class="aj-meta">${j.company || ''} ${j.date ? '· ' + j.date : ''}</span>
+    </div>`
+  ).join('');
 }
 
 // ─── SETTINGS PANEL ──────────────────────────────────────────────────
@@ -599,7 +626,7 @@ function wireSettingsPanel() {
 async function loadSettingsPanel() {
   const c = await chrome.storage.sync.get([
     'firstName','lastName','email','phone','phoneCountryCode','city',
-    'filterKeywords','yearsOfExperience','expectedSalary',
+    'filterKeywords','yearsOfExperience','expectedSalary','applyLimit',
     'filterSort','filterDate','filterSalary',
     'filterExp','filterJtype','filterRemote',
     'titleKeywords','blacklistKeywords','maxYearsRequired',
@@ -632,6 +659,7 @@ async function loadSettingsPanel() {
   // Job profile
   setVal('sp-filterKeywords', c.filterKeywords);
   setVal('sp-yearsOfExperience', c.yearsOfExperience || '2');
+  setVal('sp-applyLimit', c.applyLimit || '2');
 
   // Resume
   const fn = $('sp-resumeFileName');
@@ -689,6 +717,7 @@ async function saveSettings() {
     city:              getVal('sp-city'),
     filterKeywords:    getVal('sp-filterKeywords'),
     yearsOfExperience: getVal('sp-yearsOfExperience'),
+    applyLimit:        getVal('sp-applyLimit') || '2',
     expectedSalary:    getVal('sp-expectedSalary'),
     filterSort:        getVal('sp-filterSort'),
     filterDate:        getVal('sp-filterDate'),

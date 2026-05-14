@@ -90,11 +90,6 @@
         <small>Default answer for experience questions in forms</small>
       </div>
       <div class="form-group">
-        <label>Jobs to Apply Per Run</label>
-        <input type="number" id="s2-applyLimit" placeholder="2" value="2" min="1" max="10">
-        <small>How many jobs to apply to (1–10)</small>
-      </div>
-      <div class="form-group">
         <label>Resume / CV <span class="req-star">*</span></label>
         <div class="file-upload-wrapper">
           <input type="file" id="s2-resumeFile" accept=".pdf,.doc,.docx" style="display:none">
@@ -193,10 +188,12 @@
     </div>
     <div class="track-sep"></div>
     <div class="track-item">
-      <span class="track-label">Skipped</span>
-      <span id="skipped-count" class="track-num">0</span>
+      <span id="timer-label" class="track-label">Next in</span>
+      <span id="timer-count" class="track-num">—</span>
     </div>
   </div>
+
+  <div id="applied-jobs-list" class="applied-jobs-list"></div>
 
   <div class="main-center">
     <button id="start-btn" class="btn-start">
@@ -310,6 +307,11 @@
         <label>My Years of Experience</label>
         <input type="number" id="sp-yearsOfExperience" placeholder="2" value="2" min="0" max="50">
         <small>Your answer when application forms ask "how many years of experience?"</small>
+      </div>
+      <div class="form-group">
+        <label>Jobs to Apply Per Run</label>
+        <input type="number" id="sp-applyLimit" placeholder="2" value="2" min="1" max="10">
+        <small>How many jobs to apply to each run (1–10)</small>
       </div>
       <div class="form-group">
         <label>Resume / CV</label>

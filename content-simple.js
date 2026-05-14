@@ -1892,105 +1892,101 @@ function saveAppliedJobsToStorage() {
   chrome.storage.local.set({ appliedJobs: appliedJobs });
 }
 
-// ── Apply loop — processedIds + madeProgress mirrors 3/apply.js ──────────────
+// ── Apply 2 jobs with anti-ban delay between them, then stop ─────────────────
 async function testStep1_clickEasyApply() {
-  log('[BOT] Starting — target: 2 jobs');
+  await chrome.storage.local.set({ isRunning: true, userStopped: true });
+  log('[BOT] Start');
   await wait(2000);
 
+  const TARGET_JOBS  = parseInt(config.applyLimit) || 2;
   const processedIds = new Set();
-  const LIMIT = Math.min(10, Math.max(1, parseInt(config.applyLimit) || 2));
 
-  while (isRunning && appliedCount < LIMIT) {
+  for (let jobNum = 1; jobNum <= TARGET_JOBS; jobNum++) {
+    log(`[BOT] ── Job ${jobNum}/${TARGET_JOBS} ──`);
 
-    // Re-query cards fresh each iteration
+    // Cards — iframe first (re-query each iteration in case DOM shifted)
     const iframeDoc = document.querySelector('[data-testid="interop-iframe"]')?.contentDocument;
-    const doc   = iframeDoc || document;
+    const doc = iframeDoc || document;
     const cards = Array.from(doc.querySelectorAll('.display-flex.job-card-container'));
     log(`[BOT] ${cards.length} cards visible`);
 
-    // Find next unprocessed unapplied card
+    // Next unprocessed, unapplied card
     let target = null;
     for (const card of cards) {
       const jobId = card.getAttribute('data-job-id')
         || card.getAttribute('data-occludable-job-id')
         || card.querySelector('a[href*="/jobs/view/"]')?.href || '';
       if (!jobId || processedIds.has(jobId)) continue;
-      if (/applied/i.test(card.textContent)) {
-        processedIds.add(jobId);
-        log('  ✓ Already applied — skip');
-        continue;
-      }
+      if (/applied/i.test(card.textContent)) { log('  skip: already applied'); processedIds.add(jobId); continue; }
       target = card;
       processedIds.add(jobId);
       break;
     }
+    if (!target) { log('[BOT] no more unapplied cards'); break; }
 
-    if (!target) { log('[BOT] No more unprocessed jobs visible'); break; }
-
-    // Click title
-    const titleLink = target.querySelector('a[href*="/jobs/view/"], .job-card-list__title');
-    log('[BOT] Clicking job...');
-    if (titleLink) titleLink.click(); else target.click();
+    // Click card
+    const link = target.querySelector('a[href*="/jobs/view/"]') || target.querySelector('a');
+    log('[BOT] clicking card...');
+    if (link) link.click(); else target.click();
     await wait(3000);
 
-    // Get title
-    const freshIframe = document.querySelector('[data-testid="interop-iframe"]')?.contentDocument;
-    const titleEl = freshIframe?.querySelector('.job-details-jobs-unified-top-card__job-title, .t-24')
-      || document.querySelector('.job-details-jobs-unified-top-card__job-title, .t-24');
-    const title = titleEl?.textContent.trim() || 'Unknown';
-    log(`[BOT] Job: "${title}"`);
+    // Get title + company for tracking
+    const iDoc = document.querySelector('[data-testid="interop-iframe"]')?.contentDocument;
+    const title   = iDoc?.querySelector('.job-details-jobs-unified-top-card__job-title')?.textContent.trim()
+      || document.querySelector('.job-details-jobs-unified-top-card__job-title')?.textContent.trim() || 'Unknown';
+    const company = iDoc?.querySelector('.job-details-jobs-unified-top-card__company-name')?.textContent.trim()
+      || document.querySelector('.job-details-jobs-unified-top-card__company-name')?.textContent.trim() || '';
+    log(`[BOT] "${title}" @ ${company}`);
 
-    // Find Easy Apply button — retry once
+    // Poll for Easy Apply button up to 10s
+    log('[BOT] waiting for Easy Apply...');
     let eaBtn = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      for (const d of [document, freshIframe].filter(Boolean)) {
-        const btn = d.querySelector('button[aria-label^="Easy Apply to"]');
-        if (btn && btn.offsetParent) { eaBtn = btn; break; }
+    for (let i = 0; i < 20 && !eaBtn; i++) {
+      const d = document.querySelector('[data-testid="interop-iframe"]')?.contentDocument;
+      for (const doc2 of [document, d].filter(Boolean)) {
+        const b = doc2.querySelector('button[aria-label^="Easy Apply to"]');
+        if (b && b.offsetParent !== null) { eaBtn = b; break; }
       }
-      if (eaBtn) break;
-      if (attempt === 0) { log('[BOT] Waiting for Easy Apply...'); await wait(2000); }
+      if (!eaBtn) await wait(500);
     }
+    if (!eaBtn) { log('[BOT] Easy Apply not found — skip'); continue; }
 
-    if (!eaBtn) {
-      const visible = [...document.querySelectorAll('button'), ...(freshIframe?.querySelectorAll('button') || [])]
-        .filter(b => b.offsetParent).map(b => b.getAttribute('aria-label') || b.textContent.trim())
-        .filter(Boolean).slice(0, 8);
-      log(`[BOT] [skip:no-easy-apply] "${title}" — buttons: ${visible.join(' | ')}`);
-      skippedCount++; await chrome.storage.local.set({ skippedCount }); sendCounts();
-      continue; // try next card
-    }
-
-    // Click Easy Apply
-    log(`[BOT] Clicking: "${eaBtn.getAttribute('aria-label')}"`);
+    log(`[BOT] clicking Easy Apply: "${eaBtn.getAttribute('aria-label')}"`);
     eaBtn.click();
-    await wait(2000);
 
-    if (!testGetModal()) {
-      log(`[BOT] [skip:modal-not-opened] "${title}"`);
-      skippedCount++; await chrome.storage.local.set({ skippedCount }); sendCounts();
-      continue;
-    }
+    // Poll for modal up to 5s
+    let modal = null;
+    for (let i = 0; i < 10 && !modal; i++) { await wait(500); modal = testGetModal(); }
+    if (!modal) { log('[BOT] modal did not open — skip'); continue; }
 
-    // Fill and submit
-    log('[BOT] Modal open — filling...');
+    // Fill + submit
+    log('[BOT] filling form...');
     const ok = await testFillAndSubmit(title);
+
     if (ok) {
       appliedCount++;
-      await chrome.storage.local.set({ appliedCount });
+      appliedJobs.push({ title, company, date: new Date().toLocaleDateString() });
+      await chrome.storage.local.set({ appliedCount, appliedJobs });
       sendCounts();
-      log(`[BOT] ✓ Applied "${title}" (${appliedCount}/${LIMIT})`);
+      log(`[BOT] ✓ Applied "${title}" (${appliedCount} total)`);
     } else {
-      skippedCount++; await chrome.storage.local.set({ skippedCount }); sendCounts();
-      log(`[BOT] ✗ Could not submit "${title}"`);
+      log(`[BOT] ✗ could not submit "${title}"`);
     }
 
-    await wait(1500); // pause between jobs
+    // Anti-ban delay between jobs (skip after last)
+    if (jobNum < TARGET_JOBS) {
+      const delay = randomDelayMs(config.minDelay, config.maxDelay);
+      const secs  = Math.round(delay / 1000);
+      log(`[BOT] waiting ${secs}s before next job...`);
+      chrome.runtime.sendMessage({ type: 'timer', seconds: secs, label: 'Next in' }).catch(() => {});
+      await wait(delay);
+    }
   }
 
-  log(`[BOT] Done — Applied: ${appliedCount} Skipped: ${skippedCount}`);
   isRunning = false;
   await chrome.storage.local.set({ isRunning: false });
   chrome.runtime.sendMessage({ type: 'updateStatus', status: 'stopped' }).catch(() => {});
+  log(`[BOT] Done — Applied: ${appliedCount}`);
 }
 
 function sendCounts() {
@@ -2029,60 +2025,69 @@ function testGetModal() {
   return null;
 }
 
+// Mirrors fillAndSubmit from 3/apply.js exactly
 async function testFillAndSubmit(jobTitle = '') {
   const startTime = Date.now();
 
   for (let step = 0; step < 15; step++) {
-    if (Date.now() - startTime > 180000) {
-      log(`  [skip:timeout-3min] "${jobTitle}"`);
-      await testDiscard(); return false;
-    }
+    if (Date.now() - startTime > 180000) { await testDiscard(); return false; }
 
-    const modal = testGetModal();
-    if (!modal) { log(`[TEST] Modal gone at step ${step}`); return step > 0; }
+    // Find modal — main doc or iframe (mirrors 3/apply.js)
+    let modal = testGetModal();
+    if (!modal) { return step > 0; }
 
-    await wait(600);
+    await wait(800);
     testFillFields(modal);
-    await wait(500);
+    await wait(600);
 
-    // Button detection by text content
-    const buttons = Array.from(modal.querySelectorAll('button')).filter(b => b.offsetParent);
-    const byText  = t => buttons.find(b => b.textContent.trim().toLowerCase().includes(t.toLowerCase()));
-    const byLabel = t => buttons.find(b => (b.getAttribute('aria-label') || '').toLowerCase().includes(t.toLowerCase()));
+    // Find buttons — normalize whitespace, case-insensitive, mirrors 3/apply.js getByRole
+    const allBtns = Array.from(modal.querySelectorAll('button')).filter(b => b.offsetParent !== null);
+    const norm = s => s.replace(/\s+/g, ' ').trim().toLowerCase();
+    const byName = name => allBtns.find(b =>
+      norm(b.textContent) === norm(name) ||
+      norm(b.getAttribute('aria-label') || '') === norm(name)
+    );
 
-    const submitBtn   = byText('Submit application')      || byLabel('Submit application');
-    const reviewBtn   = byText('Review your application') || byLabel('Review');
-    const continueBtn = byText('Continue to next step')   || byLabel('Continue to next step')
-                     || byText('Next')                    || byLabel('Next');
+    const submitBtn   = byName('Submit application');
+    const reviewBtn   = byName('Review your application');
+    const continueBtn = byName('Continue to next step') || byName('Next');
 
     if (submitBtn) {
-      // Uncheck follow company
-      const followCb = modal.querySelector('#follow-company-checkbox');
-      if (followCb && followCb.checked) {
-        const lbl = modal.querySelector('label[for="follow-company-checkbox"]');
-        if (lbl) lbl.click(); else followCb.click();
+      // Uncheck follow company — mirrors 3/apply.js
+      const followLbl = modal.querySelector('label[for="follow-company-checkbox"]');
+      if (followLbl) {
+        const cb = modal.querySelector('#follow-company-checkbox');
+        if (cb && cb.checked) followLbl.click();
       }
-      log('[TEST] → Submit application');
+      log('[BOT] → Submit application');
       submitBtn.click();
       await wait(2000);
 
-      // Close post-submit "Application sent" modal
-      const closeTries = [
-        () => document.querySelector('button[aria-label="Done"], button[aria-label="Dismiss"]'),
-        () => Array.from(document.querySelectorAll('button')).find(b => /^(Done|Not now)$/i.test(b.textContent.trim()) && b.offsetParent),
-        () => document.querySelector('.artdeco-modal__dismiss'),
-      ];
-      for (const fn of closeTries) {
-        const btn = fn();
-        if (btn && btn.offsetParent) { btn.click(); await wait(500); log('[TEST] → Closed success modal'); break; }
+      // Close "Application sent" modal — mirrors 3/apply.js close selectors
+      const allDocs = [document, document.querySelector('[data-testid="interop-iframe"]')?.contentDocument].filter(Boolean);
+      let closed = false;
+      for (const d of allDocs) {
+        const btnsByText = t => Array.from(d.querySelectorAll('button')).find(b => b.textContent.replace(/\s+/g,' ').trim() === t && b.offsetParent);
+        const closers = [
+          d.querySelector('button[aria-label="Done"]'),
+          btnsByText('Done'),
+          d.querySelector('button[aria-label="Dismiss"]'),
+          btnsByText('Not now'),
+          d.querySelector('.artdeco-modal__dismiss'),
+          d.querySelector('button[aria-label*="Dismiss"]'),
+          d.querySelector('button[aria-label*="Close"]'),
+        ];
+        const closeBtn = closers.find(b => b && b.offsetParent !== null);
+        if (closeBtn) { closeBtn.click(); await wait(500); log('[BOT] → Closed success modal'); closed = true; break; }
       }
+      if (!closed) log('[BOT] success modal may have auto-closed');
       return true;
     }
 
-    if (reviewBtn)   { log('[TEST] → Review');   reviewBtn.click();   await wait(800); continue; }
-    if (continueBtn) { log('[TEST] → Continue'); continueBtn.click(); await wait(800); continue; }
+    if (reviewBtn)   { log('[BOT] → Review');   reviewBtn.click();   await wait(1000); continue; }
+    if (continueBtn) { log('[BOT] → Continue'); continueBtn.click(); await wait(1000); continue; }
 
-    log(`  [skip:no-action-button] "${jobTitle}" at step ${step} — discarding`);
+    log(`[BOT] no action button at step ${step} — discarding`);
     await testDiscard(); return false;
   }
   await testDiscard(); return false;
@@ -2164,12 +2169,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           'minDelay', 'maxDelay', 'applyLimit'
         ]);
 
-        // Reset counters on each fresh start
-        const local = await chrome.storage.local.get(['appliedJobs', 'resumeFile', 'resumeFileName', 'resumeFileType']);
+        // Reset counters and job list on each fresh start
+        const local = await chrome.storage.local.get(['resumeFile', 'resumeFileName', 'resumeFileType']);
         appliedCount = 0;
         skippedCount = 0;
-        await chrome.storage.local.set({ appliedCount: 0, skippedCount: 0 });
-        appliedJobs = local.appliedJobs || [];
+        appliedJobs = [];
+        await chrome.storage.local.set({ appliedCount: 0, skippedCount: 0, appliedJobs: [] });
 
         // Load resume data if available
         resumeFile = local.resumeFile || null;
