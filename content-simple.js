@@ -1,4 +1,4 @@
-// ULTRA SIMPLE - COPIE EXACTE DU PYTHON
+﻿// ULTRA SIMPLE - COPIE EXACTE DU PYTHON
 let isRunning = false;
 let config = {};
 let appliedCount = 0;
@@ -24,18 +24,51 @@ function log(msg) {
   } catch (e) {}
 }
 
+// Ask LLM via background.js (supports Anthropic, OpenAI, Gemini, custom)
+async function askLLM(question, fieldType) {
+  try {
+    const jobTitle  = document.querySelector('.job-details-jobs-unified-top-card__job-title, .jobs-unified-top-card__job-title')?.textContent.trim() || 'Unknown';
+    const company   = document.querySelector('.job-details-jobs-unified-top-card__company-name, .jobs-unified-top-card__company-name')?.textContent.trim() || 'Unknown';
+    const result = await chrome.runtime.sendMessage({
+      type: 'askLLM',
+      question, fieldType, jobTitle, company,
+      userProfile: {
+        firstName:         config.firstName,
+        lastName:          config.lastName,
+        yearsOfExperience: config.yearsOfExperience,
+        city:              config.city,
+      },
+    });
+    if (result?.answer) {
+      log(`[LLM] "${question}" → "${result.answer.substring(0, 60)}"`);
+      return result.answer;
+    }
+    if (result?.error) log(`[LLM] Skipped: ${result.error}`);
+  } catch (e) {
+    log(`[LLM] Error: ${e.message}`);
+  }
+  return null;
+}
+
 // Attendre
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Random delay between min and max seconds (anti-ban)
+function randomDelayMs(minSec, maxSec) {
+  const min = Math.max(1, parseFloat(minSec) || 3) * 1000;
+  const max = Math.max(min + 500, parseFloat(maxSec) || 8000);
+  return min + Math.random() * (max - min);
 }
 
 // Cliquer - PROTECTED: Only works if bot is running
 async function click(element) {
   // CRITICAL SECURITY CHECK: Prevent ANY clicks if bot is not explicitly started
   if (!isRunning || !userExplicitlyClickedStart) {
-    console.error('🚨 SECURITY VIOLATION: Attempted click() but bot is NOT running!');
-    console.error('🔒 isRunning:', isRunning, '| userExplicitlyClickedStart:', userExplicitlyClickedStart);
-    console.error('🚫 Click BLOCKED for security');
+    console.error('[ALERT] SECURITY VIOLATION: Attempted click() but bot is NOT running!');
+    console.error('[SEC] isRunning:', isRunning, '| userExplicitlyClickedStart:', userExplicitlyClickedStart);
+    console.error('[BLOCK] Click BLOCKED for security');
     console.trace('Call stack:'); // Show where this was called from
     return; // BLOCK THE CLICK
   }
@@ -79,24 +112,24 @@ function checkDailyLimit() {
 
     for (const pattern of limitPatterns) {
       if (bodyText.toLowerCase().includes(pattern.toLowerCase())) {
-        log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        log('🚫 DAILY LIMIT REACHED!');
+        log('----------------------------------------');
+        log('[BLOCK] DAILY LIMIT REACHED!');
         log(`   Message detected: "${pattern}"`);
-        log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        log('----------------------------------------');
         log('LinkedIn limits Easy Apply to ~50-100 per day');
-        log('📊 Session stats:');
-        log(`   ✅ Applied: ${appliedCount}`);
-        log(`   ⏭️  Skipped: ${skippedCount}`);
-        log('⏰ You can continue applying tomorrow!');
-        log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        log('[STATS] Session stats:');
+        log(`   [OK] Applied: ${appliedCount}`);
+        log(`   [SKIP]  Skipped: ${skippedCount}`);
+        log('[TIME] You can continue applying tomorrow!');
+        log('----------------------------------------');
 
         // Show visual notification to user
-        alert(`🚫 LinkedIn Daily Limit Reached!\n\n` +
+        alert(`[BLOCK] LinkedIn Daily Limit Reached!\n\n` +
               `You've reached LinkedIn's daily Easy Apply limit (~50-100 applications).\n\n` +
-              `📊 Today's Stats:\n` +
-              `   ✅ Applied: ${appliedCount}\n` +
-              `   ⏭️  Skipped: ${skippedCount}\n\n` +
-              `⏰ You can continue applying tomorrow!\n\n` +
+              `[STATS] Today's Stats:\n` +
+              `   [OK] Applied: ${appliedCount}\n` +
+              `   [SKIP]  Skipped: ${skippedCount}\n\n` +
+              `[TIME] You can continue applying tomorrow!\n\n` +
               `The bot has been stopped automatically.`);
 
         return true;
@@ -109,7 +142,7 @@ function checkDailyLimit() {
       const elementText = element.textContent || '';
       for (const pattern of limitPatterns) {
         if (elementText.toLowerCase().includes(pattern.toLowerCase())) {
-          log('🚫 DAILY LIMIT DETECTED in error element!');
+          log('[BLOCK] DAILY LIMIT DETECTED in error element!');
           return true;
         }
       }
@@ -117,14 +150,14 @@ function checkDailyLimit() {
 
     return false;
   } catch (error) {
-    log(`⚠️ Error checking daily limit: ${error.message}`);
+    log(`[WARN] Error checking daily limit: ${error.message}`);
     return false;
   }
 }
 
 // IMPROVED: Function to find and click Done button with exhaustive search
 async function findAndClickDoneButton(contextElement = document, contextName = 'page', maxAttempts = 15) {
-  log(`🔍 [${contextName}] Starting exhaustive search for Done button...`);
+  log(`[SCAN] [${contextName}] Starting exhaustive search for Done button...`);
 
   const doneTexts = ['Done', 'Terminé', 'Submit application', 'Soumettre la candidature', 'Dismiss', 'Close', 'Fermer'];
   let doneBtn = null;
@@ -156,7 +189,7 @@ async function findAndClickDoneButton(contextElement = document, contextName = '
           // Check if visible
           if (clickableElement.offsetParent !== null) {
             doneBtn = clickableElement;
-            log(`   ✅ [METHOD 1] Found via SPAN: "${targetText}"`);
+            log(`   [OK] [METHOD 1] Found via SPAN: "${targetText}"`);
             break;
           }
         }
@@ -172,7 +205,7 @@ async function findAndClickDoneButton(contextElement = document, contextName = '
         for (let targetText of doneTexts) {
           if (btnText === targetText && btn.offsetParent !== null) {
             doneBtn = btn;
-            log(`   ✅ [METHOD 2] Found via direct button search: "${targetText}"`);
+            log(`   [OK] [METHOD 2] Found via direct button search: "${targetText}"`);
             break;
           }
         }
@@ -186,7 +219,7 @@ async function findAndClickDoneButton(contextElement = document, contextName = '
         const ariaBtn = contextElement.querySelector(`button[aria-label*="${targetText}"], [role="button"][aria-label*="${targetText}"]`);
         if (ariaBtn && ariaBtn.offsetParent !== null) {
           doneBtn = ariaBtn;
-          log(`   ✅ [METHOD 3] Found via aria-label: "${targetText}"`);
+          log(`   [OK] [METHOD 3] Found via aria-label: "${targetText}"`);
           break;
         }
       }
@@ -199,7 +232,7 @@ async function findAndClickDoneButton(contextElement = document, contextName = '
         const controlBtn = contextElement.querySelector(`button[data-control-name*="${name}"]`);
         if (controlBtn && controlBtn.offsetParent !== null) {
           doneBtn = controlBtn;
-          log(`   ✅ [METHOD 4] Found via data-control-name: "${name}"`);
+          log(`   [OK] [METHOD 4] Found via data-control-name: "${name}"`);
           break;
         }
       }
@@ -227,7 +260,7 @@ async function findAndClickDoneButton(contextElement = document, contextName = '
 
   // Try to click if found
   if (doneBtn) {
-    log(`✅✅✅ [${contextName}] Done button FOUND! Attempting click...`);
+    log(`[OK][OK][OK] [${contextName}] Done button FOUND! Attempting click...`);
 
     let clickSuccessful = false;
 
@@ -236,20 +269,20 @@ async function findAndClickDoneButton(contextElement = document, contextName = '
       log('   Click Method 1: Standard click...');
       doneBtn.click();
       await wait(500);
-      log('   ✅ Standard click successful');
+      log('   [OK] Standard click successful');
       clickSuccessful = true;
     } catch (e1) {
-      log(`   ⚠️ Standard click failed: ${e1.message}`);
+      log(`   [WARN] Standard click failed: ${e1.message}`);
 
       // Method 2: MouseEvent
       try {
         log('   Click Method 2: MouseEvent dispatch...');
         doneBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
         await wait(500);
-        log('   ✅ MouseEvent click successful');
+        log('   [OK] MouseEvent click successful');
         clickSuccessful = true;
       } catch (e2) {
-        log(`   ⚠️ MouseEvent failed: ${e2.message}`);
+        log(`   [WARN] MouseEvent failed: ${e2.message}`);
 
         // Method 3: Focus + Enter
         try {
@@ -259,10 +292,10 @@ async function findAndClickDoneButton(contextElement = document, contextName = '
           doneBtn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true, cancelable: true }));
           doneBtn.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, bubbles: true, cancelable: true }));
           await wait(500);
-          log('   ✅ Keyboard trigger successful');
+          log('   [OK] Keyboard trigger successful');
           clickSuccessful = true;
         } catch (e3) {
-          log(`   ❌ All click methods failed: ${e3.message}`);
+          log(`   [FAIL] All click methods failed: ${e3.message}`);
         }
       }
     }
@@ -275,53 +308,54 @@ async function findAndClickDoneButton(contextElement = document, contextName = '
       return { success: false, clicked: false, reason: 'Click failed' };
     }
   } else {
-    log(`❌ [${contextName}] Done button NOT FOUND after ${maxAttempts} attempts`);
+    log(`[FAIL] [${contextName}] Done button NOT FOUND after ${maxAttempts} attempts`);
     return { success: false, clicked: false, reason: 'Button not found' };
   }
 }
 
-// Refresh page and return to job search
+// Refresh page — preserve the filtered URL (never lose f_AL=true and other filters)
 async function refreshAndReturnToSearch() {
-  log('🔄 REFRESHING page due to stuck detection...');
+  log('[RETRY] REFRESHING page due to stuck detection...');
   try {
-    // Reload the page
-    location.reload();
-    // Wait will happen automatically when page reloads
+    // Keep the current URL (which has all filters) — don't strip them
+    const currentUrl = window.location.href;
+    const filteredUrl = currentUrl.includes('f_AL=true') ? currentUrl : currentUrl;
+    location.href = filteredUrl; // navigate to same URL to preserve filters
     return true;
   } catch (error) {
-    log(`❌ Error refreshing page: ${error.message}`);
+    log(`[FAIL] Error refreshing page: ${error.message}`);
     return false;
   }
 }
 
 // Discard application (Python ligne 1500-1580) - ULTRA AGGRESSIVE VERSION + STUCK DETECTION
 async function discardApplication() {
-  log('🚀 DISCARD: Starting SAFE discard sequence...');
+  log('[START] DISCARD: Starting SAFE discard sequence...');
 
   const discardTexts = ['discard', 'annuler', 'cancel', 'abandonner', 'descarter'];
 
   try {
-    // 🆕 DETECTION CRITIQUE: Vérifier si popup de chargement est bloqué (Python ligne 1547-1558)
+    // [NEW] DETECTION CRITIQUE: Vérifier si popup de chargement est bloqué (Python ligne 1547-1558)
     if (checkForStuckLoadingPopup()) {
-      log('🚨 POPUP DE CHARGEMENT BLOQUÉ DÉTECTÉ!');
-      log('🔄 REFRESH DE LA PAGE POUR DÉBLOQUER...');
+      log('[ALERT] POPUP DE CHARGEMENT BLOQUÉ DÉTECTÉ!');
+      log('[RETRY] REFRESH DE LA PAGE POUR DÉBLOQUER...');
       try {
-        location.reload();
+        location.href = window.location.href;
         await wait(2000); // Optimized refresh wait
-        log('✅ Page rafraîchie avec succès');
+        log('[OK] Page rafraîchie avec succès');
         return true;
       } catch (error) {
-        log(`❌ Erreur lors du refresh: ${error.message}`);
+        log(`[FAIL] Erreur lors du refresh: ${error.message}`);
       }
     }
 
     // STEP 1: Force close with X button (MOST RELIABLE METHOD - moved to first)
-    log('🔍 STEP 1: Looking for X/Close button...');
+    log('[SCAN] STEP 1: Looking for X/Close button...');
     const closeButtons = document.querySelectorAll('button[aria-label*="Dismiss"], button[aria-label*="Close"], button.artdeco-modal__dismiss');
 
     for (let btn of closeButtons) {
       if (btn.offsetParent) {
-        log(`✅ Clicking close button: ${btn.getAttribute('aria-label')}`);
+        log(`[OK] Clicking close button: ${btn.getAttribute('aria-label')}`);
         btn.click();
         await wait(1000);
 
@@ -331,27 +365,27 @@ async function discardApplication() {
         );
 
         if (discardBtn) {
-          log('✅ Clicking discard confirmation');
+          log('[OK] Clicking discard confirmation');
           discardBtn.click();
           await wait(1500);
         }
 
         const modal = document.querySelector('.jobs-easy-apply-modal');
         if (!modal || modal.offsetParent === null) {
-          log('✅✅✅ MODAL CLOSED!');
+          log('[OK][OK][OK] MODAL CLOSED!');
           return true;
         }
       }
     }
 
     // STEP 2: Press ESC key (fallback)
-    log('📤 STEP 2: Pressing ESC key...');
+    log('[SEND] STEP 2: Pressing ESC key...');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
     document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', keyCode: 27, bubbles: true }));
     await wait(1000); // Optimized ESC wait
 
     // STEP 3: Look for ANY discard/cancel button (last resort)
-    log('🔍 STEP 3: Searching for Discard/Cancel buttons...');
+    log('[SCAN] STEP 3: Searching for Discard/Cancel buttons...');
 
     // Try 3 times to find the button (it may appear slowly)
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -379,7 +413,7 @@ async function discardApplication() {
         );
 
         if (isDiscardButton) {
-          log(`✅ FOUND: "${btn.textContent.trim()}" (visible, will click)`);
+          log(`[OK] FOUND: "${btn.textContent.trim()}" (visible, will click)`);
 
           // Click with multiple methods
           try {
@@ -387,7 +421,7 @@ async function discardApplication() {
             await wait(300);
             btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
           } catch (e) {
-            log(`⚠️ Click error: ${e.message}`);
+            log(`[WARN] Click error: ${e.message}`);
           }
 
           await wait(1500);
@@ -395,7 +429,7 @@ async function discardApplication() {
           // Check if modal closed
           const modal = document.querySelector('.jobs-easy-apply-modal');
           if (!modal || modal.offsetParent === null) {
-            log('✅✅✅ MODAL CLOSED SUCCESSFULLY!');
+            log('[OK][OK][OK] MODAL CLOSED SUCCESSFULLY!');
             return true;
           }
         }
@@ -404,11 +438,11 @@ async function discardApplication() {
       await wait(1000); // Wait before retry
     }
 
-    log('❌ DISCARD FAILED: Could not close modal after all attempts');
+    log('[FAIL] DISCARD FAILED: Could not close modal after all attempts');
     return false;
 
   } catch (error) {
-    log(`❌ Error discarding: ${error.message}`);
+    log(`[FAIL] Error discarding: ${error.message}`);
     return false;
   }
 }
@@ -417,9 +451,9 @@ async function discardApplication() {
 function fill(input, value) {
   // CRITICAL SECURITY CHECK: Prevent ANY form filling if bot is not explicitly started
   if (!isRunning || !userExplicitlyClickedStart) {
-    console.error('🚨 SECURITY VIOLATION: Attempted fill() but bot is NOT running!');
-    console.error('🔒 isRunning:', isRunning, '| userExplicitlyClickedStart:', userExplicitlyClickedStart);
-    console.error('🚫 Fill BLOCKED for security');
+    console.error('[ALERT] SECURITY VIOLATION: Attempted fill() but bot is NOT running!');
+    console.error('[SEC] isRunning:', isRunning, '| userExplicitlyClickedStart:', userExplicitlyClickedStart);
+    console.error('[BLOCK] Fill BLOCKED for security');
     return; // BLOCK THE FILL
   }
 
@@ -446,7 +480,7 @@ function base64ToFile(base64String, filename, mimeType) {
     const file = new File([bytes], filename, { type: mimeType });
     return file;
   } catch (error) {
-    log(`❌ Error converting base64 to file: ${error.message}`);
+    log(`[FAIL] Error converting base64 to file: ${error.message}`);
     return null;
   }
 }
@@ -464,10 +498,10 @@ async function fillFileInput(fileInput, file) {
     // Trigger change event
     fileInput.dispatchEvent(new Event('change', { bubbles: true }));
 
-    log(`✅ Resume uploaded: ${file.name}`);
+    log(`[OK] Resume uploaded: ${file.name}`);
     return true;
   } catch (error) {
-    log(`❌ Error filling file input: ${error.message}`);
+    log(`[FAIL] Error filling file input: ${error.message}`);
     return false;
   }
 }
@@ -476,13 +510,13 @@ async function fillFileInput(fileInput, file) {
 async function mainLoop() {
   // SECURITY: Triple-layer protection - bot MUST be explicitly started by user
   if (!isRunning) {
-    log('⚠️ SECURITY BLOCK 1/3: mainLoop called but isRunning=false - ABORTING');
+    log('[WARN] SECURITY BLOCK 1/3: mainLoop called but isRunning=false - ABORTING');
     return;
   }
 
   if (!userExplicitlyClickedStart) {
-    log('🚨 SECURITY BLOCK 2/3: mainLoop called but user did NOT click Start - ABORTING');
-    log('🔒 This prevents any automatic execution. Bot ONLY runs when you click Start.');
+    log('[ALERT] SECURITY BLOCK 2/3: mainLoop called but user did NOT click Start - ABORTING');
+    log('[SEC] This prevents any automatic execution. Bot ONLY runs when you click Start.');
     isRunning = false; // Force stop for safety
     await chrome.storage.local.set({ isRunning: false });
     return;
@@ -490,34 +524,34 @@ async function mainLoop() {
 
   // Final sanity check
   if (!config || !config.email) {
-    log('⚠️ SECURITY BLOCK 3/3: No config loaded - ABORTING');
+    log('[WARN] SECURITY BLOCK 3/3: No config loaded - ABORTING');
     isRunning = false;
     userExplicitlyClickedStart = false;
     await chrome.storage.local.set({ isRunning: false });
     return;
   }
 
-  console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: green; font-weight: bold;');
-  console.log('%c🚀 BOT STARTED - User clicked START button', 'color: green; font-weight: bold; font-size: 14px;');
-  console.log('%c✅ ALL SECURITY CHECKS PASSED', 'color: green; font-weight: bold;');
-  console.log('%c🔓 Click() and Fill() functions are now ENABLED', 'color: green; font-weight: bold;');
-  console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: green; font-weight: bold;');
-  log('🚀 ✅ ALL SECURITY CHECKS PASSED - Bot started by user');
+  console.log('%c----------------------------------------', 'color: green; font-weight: bold;');
+  console.log('%c[START] BOT STARTED - User clicked START button', 'color: green; font-weight: bold; font-size: 14px;');
+  console.log('%c[OK] ALL SECURITY CHECKS PASSED', 'color: green; font-weight: bold;');
+  console.log('%c[UNLOCK] Click() and Fill() functions are now ENABLED', 'color: green; font-weight: bold;');
+  console.log('%c----------------------------------------', 'color: green; font-weight: bold;');
+  log('[START] [OK] ALL SECURITY CHECKS PASSED - Bot started by user');
 
   // Detect page type ONCE at start
   const isCollectionsPage = window.location.href.includes('/jobs/collections/');
   if (isCollectionsPage) {
-    log('📋 Page type: COLLECTIONS (infinite scroll mode)');
+    log('[INFO] Page type: COLLECTIONS (infinite scroll mode)');
   } else {
-    log('📋 Page type: SEARCH (pagination mode)');
+    log('[INFO] Page type: SEARCH (pagination mode)');
   }
-  log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  log('----------------------------------------');
 
   while (isRunning) {
     try {
-      // 🆕 CHECK: Daily limit reached?
+      // [NEW] CHECK: Daily limit reached?
       if (checkDailyLimit()) {
-        log('⛔ Stopping bot: Daily limit reached');
+        log('[STOP] Stopping bot: Daily limit reached');
         isRunning = false;
         userExplicitlyClickedStart = false; // Clear security flag
 
@@ -537,34 +571,49 @@ async function mainLoop() {
         break;
       }
 
-      // 🆕 CHECK: Script stuck? (no activity for 2 minutes)
+      // [NEW] CHECK: Script stuck? (no activity for 2 minutes)
       if (isStuck()) {
-        log('🚨 SCRIPT STUCK DETECTED: No activity for 2 minutes!');
-        log('🔄 Refreshing page to recover...');
+        log('[ALERT] SCRIPT STUCK DETECTED: No activity for 2 minutes!');
+        log('[RETRY] Refreshing page to recover...');
         await refreshAndReturnToSearch();
         await wait(2500); // Optimized stuck recovery wait
         updateActivity(); // Reset activity after refresh
         continue;
       }
 
-      // Python ligne 1695: job_listings = driver.find_elements(By.XPATH, "//li[@data-occludable-job-id]")
-      let jobCards = document.querySelectorAll('li[data-occludable-job-id]');
+      // Find job cards — check iframe first (confirmed via Playwright testing)
+      const iframeEl = document.querySelector('[data-testid="interop-iframe"]');
+      const iframeDoc = iframeEl?.contentDocument;
+      let jobCards = iframeDoc ? iframeDoc.querySelectorAll('.display-flex.job-card-container') : [];
+      let selectorUsed = 'iframe:.display-flex.job-card-container';
+      let useIframe = jobCards.length > 0;
 
-      // ONLY on collections page: use fallback selectors if no jobs found with standard selector
-      if (jobCards.length === 0 && isCollectionsPage) {
-        jobCards = document.querySelectorAll('.jobs-search-results__list-item, .scaffold-layout__list-item');
-        if (jobCards.length > 0) {
-          log(`📋 Collections mode: found ${jobCards.length} jobs with fallback selectors`);
+      // Fallback to main document selectors
+      if (jobCards.length === 0) {
+        const fallbacks = [
+          ['li[data-occludable-job-id]', 'data-occludable-job-id'],
+          ['.display-flex.job-card-container', 'job-card-container'],
+          ['.jobs-search-results__list-item', 'jobs-search-results__list-item'],
+        ];
+        for (const [selector, label] of fallbacks) {
+          const found = document.querySelectorAll(selector);
+          if (found.length > 0) {
+            jobCards = found; selectorUsed = label; useIframe = false;
+            log(`[INFO] Using fallback "${label}": ${found.length} jobs`);
+            break;
+          }
         }
       }
 
       if (jobCards.length === 0) {
-        log(`Aucune offre trouvée. Attente 5s...`);
+        log(`[WARN] No job cards found on this page (tried all selectors).`);
+        log(`   Make sure you are on: linkedin.com/jobs/search/?f_AL=true`);
+        log(`   The Easy Apply filter must be ON and job listings must be visible.`);
 
         // Check if page is unrecognized (no jobs for too long)
         if (isStuck()) {
-          log('🚨 Page might be unrecognized (no jobs found + stuck)');
-          log('🔄 Refreshing to return to job search...');
+          log('[ALERT] Page might be unrecognized (no jobs found + stuck)');
+          log('[RETRY] Refreshing to return to job search...');
           await refreshAndReturnToSearch();
           await wait(2500); // Optimized refresh recovery wait
           updateActivity();
@@ -574,7 +623,7 @@ async function mainLoop() {
         continue;
       }
 
-      log(`${jobCards.length} offres trouvées`);
+      log(`[OK] ${jobCards.length} jobs found (selector: ${selectorUsed})`);
       updateActivity(); // Found jobs = activity
 
       // Python ligne 1701: for job in job_listings
@@ -586,23 +635,12 @@ async function mainLoop() {
 
         log(`\n--- Job ${i + 1}/${jobCards.length} (ID: ${jobId}) ---`);
 
-        // CRITICAL: Check if modal from previous job is still open (stuck scenario)
+        // Only discard if the apply modal is actually open (not the success notification X)
         const leftoverModal = document.querySelector('.jobs-easy-apply-modal');
         if (leftoverModal && leftoverModal.offsetParent !== null) {
-          log('⚠️ WARNING: Modal from previous job still open! Cleaning up...');
+          log('[WARN] Leftover apply modal — discarding');
           await discardApplication();
-          await wait(1000); // Optimized cleanup wait
-
-          // Verify it's closed
-          const stillOpen = document.querySelector('.jobs-easy-apply-modal');
-          if (stillOpen && stillOpen.offsetParent !== null) {
-            log('❌ CRITICAL: Could not close leftover modal, skipping this job');
-            skippedCount++;
-            updateSkippedCount();
-            continue;
-          } else {
-            log('✅ Leftover modal cleaned up successfully');
-          }
+          await wait(500);
         }
 
         // Get job info for filtering
@@ -619,51 +657,51 @@ async function mainLoop() {
           jobDescription = job.querySelector('.job-card-container__metadata-item')?.textContent.trim() || '';
         }
 
+        // Title whitelist — skip if title has none of the required keywords
+        if (shouldSkipByTitleFilter(jobTitle, config.titleKeywords)) {
+          log(`[SKIP reason=title-filter] "${jobTitle}"`);
+          skippedCount++; updateSkippedCount(); continue;
+        }
+
         // Check blacklist keywords
         if (shouldSkipByBlacklist(jobTitle, jobCompany, jobDescription, config.blacklistKeywords)) {
-          skippedCount++;
-          updateSkippedCount();
-          continue;
+          log(`[SKIP reason=blacklist] "${jobTitle}" at ${jobCompany}`);
+          skippedCount++; updateSkippedCount(); continue;
         }
 
         // Check max years required
         if (shouldSkipByExperience(job, parseInt(config.maxYearsRequired))) {
-          skippedCount++;
-          updateSkippedCount();
-          continue;
+          log(`[SKIP reason=exp-required] "${jobTitle}"`);
+          skippedCount++; updateSkippedCount(); continue;
         }
 
-        // Scroll and click (Python line 371)
-        job.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        // Scroll and click the title link inside the card
+        job.scrollIntoView({ block: 'center', behavior: 'smooth' });
         await wait(500);
+        const titleLink = job.querySelector('a[href*="/jobs/view/"]') || job.querySelector('a');
+        if (titleLink) { await click(titleLink); }
+        else { job.click(); }
+        await wait(2000); // wait for job detail pane to load
 
-        const link = job.querySelector('a');
-        if (link) {
-          await click(link);
-          await wait(600); // Ultra optimized job link wait
-        }
-
-        // Chercher Easy Apply (Python ligne 1853)
-        let easyApplyBtn = document.querySelector('button.jobs-apply-button[aria-label*="Easy"]');
-
-        // ONLY on collections page: try additional selectors if not found
-        if (!easyApplyBtn && isCollectionsPage) {
-          // Try other Easy Apply selectors (must contain "Easy" to avoid external Apply)
-          easyApplyBtn = document.querySelector('button[aria-label*="Easy Apply"]');
-          if (easyApplyBtn) {
-            log('📋 Found Easy Apply with collections selector');
-          }
+        // Find Easy Apply button — must start with "Easy Apply to" (not filter pill)
+        // Search both main doc and iframe doc
+        const searchDocs = [document];
+        if (iframeEl?.contentDocument) searchDocs.push(iframeEl.contentDocument);
+        let easyApplyBtn = null;
+        for (const doc of searchDocs) {
+          easyApplyBtn = doc.querySelector('button[aria-label^="Easy Apply to"]');
+          if (easyApplyBtn && easyApplyBtn.offsetParent) break;
+          easyApplyBtn = null;
         }
 
         if (!easyApplyBtn) {
-          log('Pas Easy Apply, skip');
-          skippedCount++;
-          updateSkippedCount();
-          continue;
+          log(`[SKIP reason=no-easy-apply-btn] "${jobTitle}"`);
+          skippedCount++; updateSkippedCount(); continue;
         }
 
+        log(`[OK] Easy Apply: "${easyApplyBtn.getAttribute('aria-label')}"`);
         await click(easyApplyBtn);
-        await wait(800); // Ultra optimized Easy Apply wait
+        await wait(2000);
 
         // Safety reminder modal ("Continue applying")
         // LinkedIn sometimes shows a "Job search safety reminder" dialog
@@ -690,15 +728,15 @@ async function mainLoop() {
         // This catches the network error case where modal doesn't appear
         if (checkDailyLimit()) {
           log('');
-          log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-          log('🚫 LINKEDIN DAILY LIMIT REACHED!');
-          log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          log('----------------------------------------');
+          log('[BLOCK] LINKEDIN DAILY LIMIT REACHED!');
+          log('----------------------------------------');
           log('LinkedIn limits Easy Apply to ~50-100 per day');
-          log(`✅ Applied today: ${appliedCount}`);
-          log(`⏭️  Skipped today: ${skippedCount}`);
-          log('⏰ You can continue applying tomorrow!');
-          log('🛑 Bot stopped automatically');
-          log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          log(`[OK] Applied today: ${appliedCount}`);
+          log(`[SKIP]  Skipped today: ${skippedCount}`);
+          log('[TIME] You can continue applying tomorrow!');
+          log('[STOP] Bot stopped automatically');
+          log('----------------------------------------');
           log('');
 
           isRunning = false;
@@ -720,23 +758,28 @@ async function mainLoop() {
           break; // Exit job loop
         }
 
-        // Verify that modal appeared (if not, might be limit reached)
-        const modalCheck = document.querySelector('.jobs-easy-apply-modal');
+        // Verify that modal appeared — retry up to 3s before giving up
+        let modalCheck = null;
+        for (let mi = 0; mi < 6; mi++) {
+          modalCheck = document.querySelector('.jobs-easy-apply-modal');
+          if (modalCheck && modalCheck.offsetParent !== null) break;
+          await wait(500);
+        }
         if (!modalCheck || modalCheck.offsetParent === null) {
-          log('⚠️ Easy Apply modal did not appear - checking for limit...');
-          await wait(1000); // Optimized modal check wait
+          log('[WARN] Easy Apply modal did not appear - checking for limit...');
+          await wait(500);
 
           if (checkDailyLimit()) {
             log('');
-            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            log('🚫 LINKEDIN DAILY LIMIT REACHED!');
-            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            log('----------------------------------------');
+            log('[BLOCK] LINKEDIN DAILY LIMIT REACHED!');
+            log('----------------------------------------');
             log('LinkedIn limits Easy Apply to ~50-100 per day');
-            log(`✅ Applied today: ${appliedCount}`);
-            log(`⏭️  Skipped today: ${skippedCount}`);
-            log('⏰ You can continue applying tomorrow!');
-            log('🛑 Bot stopped automatically');
-            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            log(`[OK] Applied today: ${appliedCount}`);
+            log(`[SKIP]  Skipped today: ${skippedCount}`);
+            log('[TIME] You can continue applying tomorrow!');
+            log('[STOP] Bot stopped automatically');
+            log('----------------------------------------');
             log('');
 
             isRunning = false;
@@ -759,7 +802,7 @@ async function mainLoop() {
           }
 
           // Modal still not there and no limit message - skip job
-          log('❌ Modal did not appear (unknown reason), skipping job');
+          log('[FAIL] Modal did not appear (unknown reason), skipping job');
           skippedCount++;
           updateSkippedCount();
           continue;
@@ -780,22 +823,14 @@ async function mainLoop() {
 
           // TIMEOUT CHECK (Python ligne 639)
           if (Date.now() - applicationStartTime > applicationTimeout) {
-            log('⏰ TIMEOUT 3min - Discarding application');
+            log('[TIME] TIMEOUT 3min - Discarding application');
             await discardApplication();
             skippedCount++;
             updateSkippedCount();
             break;
           }
 
-          // 🆕 RE-CHECK: Popup bloqué avant chaque step (Python ligne 1563-1568)
-          if (checkForStuckLoadingPopup()) {
-            log('🚨 POPUP TOUJOURS BLOQUÉ - REFRESH...');
-            location.reload();
-            await wait(2000); // Optimized refresh wait
-            skippedCount++;
-            updateSkippedCount();
-            break;
-          }
+          // checkForStuckLoadingPopup disabled — too aggressive for new LinkedIn UI
 
           // CHECK FOR VALIDATION ERRORS EARLY (stuck scenario)
           let modal = document.querySelector('.jobs-easy-apply-modal');
@@ -810,8 +845,8 @@ async function mainLoop() {
                     errorText.includes('must be') ||
                     errorText.includes('invalid')) {
 
-                  log(`❌ STUCK: Validation error detected: ${error.textContent.substring(0, 50)}`);
-                  log('⚠️ Discarding application due to validation error');
+                  log(`[FAIL] STUCK: Validation error detected: ${error.textContent.substring(0, 50)}`);
+                  log('[WARN] Discarding application due to validation error');
 
                   await discardApplication();
                   skippedCount++;
@@ -824,40 +859,7 @@ async function mainLoop() {
             if (step === 999) break;
           }
 
-          // CHECK LOADING SCREEN (Python ligne 1481-1497)
-          if (await isPageLoadingSlow()) {
-            log('⏳ Loading screen detected...');
-            const loadingStart = Date.now();
-
-            while (await isPageLoadingSlow()) {
-              if (Date.now() - loadingStart > loadingScreenTimeout) {
-                log('⏰ Loading screen TIMEOUT 20s - Discarding application');
-
-                // Use the discardApplication function to properly close modal
-                const discarded = await discardApplication();
-
-                if (discarded) {
-                  log('✅ Modal closed successfully, moving to next job');
-                } else {
-                  log('⚠️ Modal may not be closed, forcing break anyway');
-                }
-
-                skippedCount++;
-                updateSkippedCount();
-
-                // Wait to ensure modal is closed and page is stable
-                await wait(1000); // Optimized modal stable wait
-
-                // Exit the step loop to move to next job
-                break;
-              }
-              await wait(1000);
-            }
-
-            if (Date.now() - loadingStart > loadingScreenTimeout) {
-              break; // Sortir du while principal pour passer au job suivant
-            }
-          }
+          // isPageLoadingSlow disabled — triggers on LinkedIn SPA spinners, too aggressive
 
           log(`Step ${step}`);
 
@@ -906,7 +908,7 @@ async function mainLoop() {
                 fill(input, config.expectedSalary);
                 log(`Salary filled: ${config.expectedSalary}`);
               } else {
-                log(`⚠️ Salary question detected but no expected salary configured`);
+                log(`[WARN] Salary question detected but no expected salary configured`);
               }
             }
             // Email
@@ -962,7 +964,7 @@ async function mainLoop() {
 
                 if (firstOption) {
                   firstOption.click();
-                  log(`✓ Location autocomplete: ${firstOption.textContent.substring(0, 30)}`);
+                  log(`[OK] Location autocomplete: ${firstOption.textContent.substring(0, 30)}`);
                   await wait(500);
                 }
               } else {
@@ -975,6 +977,47 @@ async function mainLoop() {
                 input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
                 await wait(300);
               }
+            }
+          }
+
+          // 1b. UNMATCHED TEXT INPUTS — ask LLM
+          for (let input of textInputs) {
+            if (input.value) continue;
+            // Build label the same way as above
+            let labelText = (input.getAttribute('aria-label') || '') + ' ' + (input.getAttribute('name') || '');
+            const lid = input.getAttribute('id');
+            if (lid) { const lel = modal.querySelector(`label[for="${lid}"]`); if (lel) labelText += ' ' + lel.textContent; }
+            const pl = input.closest('label'); if (pl) labelText += ' ' + pl.textContent;
+            const label = labelText.toLowerCase().trim();
+            if (!label) continue;
+            // Skip fields already handled above
+            if (label.match(/experience|years|salary|compensation|email|first|last|phone|city|location|ville|ciudad/)) continue;
+            const answer = await askLLM(labelText.trim(), 'text');
+            if (answer) { fill(input, answer); await wait(200); }
+          }
+
+          // 1c. TEXTAREAS — ask LLM for every open-ended question
+          const textareas = modal.querySelectorAll('textarea');
+          for (let ta of textareas) {
+            if (ta.value && ta.value.trim()) continue; // already filled
+            let labelText = (ta.getAttribute('aria-label') || '') + ' ' + (ta.getAttribute('name') || '');
+            const tid = ta.getAttribute('id');
+            if (tid) { const lel = modal.querySelector(`label[for="${tid}"]`); if (lel) labelText += ' ' + lel.textContent; }
+            const pl = ta.closest('label'); if (pl) labelText += ' ' + pl.textContent;
+            // Also grab nearby heading/paragraph as context
+            const nearby = ta.closest('.fb-form-element, .jobs-easy-apply-form-element, [class*="form"]');
+            if (nearby) labelText += ' ' + (nearby.querySelector('span, p, h3')?.textContent || '');
+            labelText = labelText.trim();
+            if (!labelText) continue;
+            log(`[LLM] Textarea question: "${labelText.substring(0,80)}"`);
+            const answer = await askLLM(labelText, 'textarea');
+            if (answer) {
+              ta.focus();
+              ta.value = answer;
+              ta.dispatchEvent(new Event('input', { bubbles: true }));
+              ta.dispatchEvent(new Event('change', { bubbles: true }));
+              log(`[LLM] Filled textarea`);
+              await wait(300);
             }
           }
 
@@ -1013,16 +1056,16 @@ async function mainLoop() {
                       const label = modal.querySelector(`label[for="${option.id}"]`);
                       if (label) {
                         label.click();
-                        log(`✅ Selected existing resume: ${label.textContent.substring(0, 40)}`);
+                        log(`[OK] Selected existing resume: ${label.textContent.substring(0, 40)}`);
                       } else {
                         option.click();
-                        log(`✅ Selected existing resume (radio)`);
+                        log(`[OK] Selected existing resume (radio)`);
                       }
                       resumeAlreadySelected = true;
                       await wait(500);
                       break;
                     } else {
-                      log(`✅ Resume already selected`);
+                      log(`[OK] Resume already selected`);
                       resumeAlreadySelected = true;
                       break;
                     }
@@ -1033,12 +1076,12 @@ async function mainLoop() {
                                       option.querySelector('input[type="radio"]:checked');
                     if (!isSelected) {
                       option.click();
-                      log(`✅ Selected existing resume card`);
+                      log(`[OK] Selected existing resume card`);
                       resumeAlreadySelected = true;
                       await wait(500);
                       break;
                     } else {
-                      log(`✅ Resume card already selected`);
+                      log(`[OK] Resume card already selected`);
                       resumeAlreadySelected = true;
                       break;
                     }
@@ -1056,7 +1099,7 @@ async function mainLoop() {
             for (let fileInput of fileInputs) {
               // Check if already has a file
               if (fileInput.files && fileInput.files.length > 0) {
-                log(`⏭️ File input already has file: ${fileInput.files[0].name}`);
+                log(`[SKIP] File input already has file: ${fileInput.files[0].name}`);
                 continue;
               }
 
@@ -1080,7 +1123,7 @@ async function mainLoop() {
               const isResumeInput = label.match(/resume|cv|curriculum|vitae|upload.*document|file/);
 
               if (isResumeInput) {
-                log(`📎 File input detected (no existing resume found): ${labelText.substring(0, 50)}`);
+                log(`[ATTACH] File input detected (no existing resume found): ${labelText.substring(0, 50)}`);
 
                 // Convert base64 to File object
                 const file = base64ToFile(resumeFile, resumeFileName, resumeFileType);
@@ -1089,22 +1132,22 @@ async function mainLoop() {
                   const success = await fillFileInput(fileInput, file);
 
                   if (success) {
-                    log(`✅ Resume uploaded successfully (first time upload)`);
+                    log(`[OK] Resume uploaded successfully (first time upload)`);
                     await wait(500); // Wait for LinkedIn to process the upload
                   } else {
-                    log(`⚠️ Failed to upload resume to file input`);
+                    log(`[WARN] Failed to upload resume to file input`);
                   }
                 } else {
-                  log(`❌ Failed to convert resume to File object`);
+                  log(`[FAIL] Failed to convert resume to File object`);
                 }
               } else {
-                log(`⏭️ Skipping file input (not resume): ${labelText.substring(0, 50)}`);
+                log(`[SKIP] Skipping file input (not resume): ${labelText.substring(0, 50)}`);
               }
             }
           } else if (!resumeAlreadySelected && modal.querySelector('input[type="file"]')) {
             // File input found but no resume uploaded in extension
             const fileInputsCount = modal.querySelectorAll('input[type="file"]').length;
-            log(`⚠️ ${fileInputsCount} file input(s) found but no resume uploaded in extension`);
+            log(`[WARN] ${fileInputsCount} file input(s) found but no resume uploaded in extension`);
             log(`   Upload your resume in the extension popup to auto-fill file uploads`);
           }
 
@@ -1121,7 +1164,7 @@ async function mainLoop() {
             if (labelText.match(/consent|agree|terms|conditions|policy|privacy|accept|j'accepte|j'autorise|consentement/)) {
               if (!checkbox.checked) {
                 checkboxLabel ? checkboxLabel.click() : checkbox.click();
-                log(`✓ Checkbox: ${labelText.substring(0, 40)}`);
+                log(`[OK] Checkbox: ${labelText.substring(0, 40)}`);
                 await wait(300);
               }
             }
@@ -1142,27 +1185,27 @@ async function mainLoop() {
             // Visa sponsorship question
             if (questionText.match(/visa|sponsor|sponsorship/i) && config.visaSponsorship) {
               desiredAnswer = config.visaSponsorship;
-              log(`⚙️ Visa question detected, answering: ${desiredAnswer}`);
+              log(`[CFG] Visa question detected, answering: ${desiredAnswer}`);
             }
             // Work authorization question
             else if (questionText.match(/author|legal.*work|permit.*work|eligib.*work|right.*work/i) && config.legallyAuthorized) {
               desiredAnswer = config.legallyAuthorized;
-              log(`⚙️ Work authorization question detected, answering: ${desiredAnswer}`);
+              log(`[CFG] Work authorization question detected, answering: ${desiredAnswer}`);
             }
             // Relocation question
             else if (questionText.match(/relocat|move.*locat|willing.*move/i) && config.willingToRelocate) {
               desiredAnswer = config.willingToRelocate;
-              log(`⚙️ Relocation question detected, answering: ${desiredAnswer}`);
+              log(`[CFG] Relocation question detected, answering: ${desiredAnswer}`);
             }
             // Security clearance question (always answer No)
             else if (questionText.match(/security.*clearance|clearance/i)) {
               desiredAnswer = 'no';
-              log(`⚙️ Security clearance question detected, answering: no (default)`);
+              log(`[CFG] Security clearance question detected, answering: no (default)`);
             }
             // Driver's license question
             else if (questionText.match(/driver.*license|driving.*license|valid.*license/i) && config.driversLicense) {
               desiredAnswer = config.driversLicense;
-              log(`⚙️ Driver's license question detected, answering: ${desiredAnswer}`);
+              log(`[CFG] Driver's license question detected, answering: ${desiredAnswer}`);
             }
 
             // Click the appropriate answer (Yes or No)
@@ -1395,10 +1438,10 @@ async function mainLoop() {
               const label = modal.querySelector(`label[for="${followCheckbox.id}"]`);
               if (label) {
                 await click(label);
-                log('✅ Entreprise UNFOLLOWED');
+                log('[OK] Entreprise UNFOLLOWED');
               } else {
                 followCheckbox.click();
-                log('✅ Entreprise UNFOLLOWED (fallback)');
+                log('[OK] Entreprise UNFOLLOWED (fallback)');
               }
             } else {
               log('Checkbox Follow déjà décochée ou non trouvée');
@@ -1409,12 +1452,12 @@ async function mainLoop() {
 
           // Vérifier que le bouton n'est pas disabled
           if (nextBtn.disabled || nextBtn.getAttribute('aria-disabled') === 'true') {
-            log('⚠️ Button disabled, checking for stuck scenario...');
+            log('[WARN] Button disabled, checking for stuck scenario...');
 
             // If button stays disabled for too long = stuck
             if (step > 2) {
-              log('❌ STUCK: Button remains disabled after multiple attempts');
-              log('⚠️ Probably validation error - DISCARDING');
+              log('[FAIL] STUCK: Button remains disabled after multiple attempts');
+              log('[WARN] Probably validation error - DISCARDING');
 
               await discardApplication();
               skippedCount++;
@@ -1456,8 +1499,8 @@ async function mainLoop() {
                       errorText.includes('veuillez') ||
                       errorText.includes('requis')) {
 
-                    log(`❌ VALIDATION ERROR: ${error.textContent.substring(0, 60)}`);
-                    log('⚠️ Cannot fix validation error - DISCARDING application');
+                    log(`[FAIL] VALIDATION ERROR: ${error.textContent.substring(0, 60)}`);
+                    log('[WARN] Cannot fix validation error - DISCARDING application');
 
                     await discardApplication();
                     skippedCount++;
@@ -1477,7 +1520,7 @@ async function mainLoop() {
           }
 
           if (isSubmit) {
-            log('✅ Submit cliqué !');
+            log('[OK] Submit cliqué !');
             appliedCount++;
 
             // Sauvegarder le job appliqué pour export
@@ -1491,13 +1534,13 @@ async function mainLoop() {
             saveAppliedJobsToStorage();
 
             // OPTIMIZED: Check modal status immediately after Submit
-            log('🔍 Checking if modal closed after Submit...');
+            log('[SCAN] Checking if modal closed after Submit...');
             await wait(1000); // Short wait to let page process
 
             // OPTIMIZATION: Check if modal already closed (means application is complete)
             let modalCheck = document.querySelector('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal');
             if (!modalCheck || modalCheck.offsetParent === null) {
-              log('✅ Modal closed immediately - Application completed!');
+              log('[OK] Modal closed immediately - Application completed!');
               updateActivity();
 
               // Skip all waiting - application is done
@@ -1514,13 +1557,13 @@ async function mainLoop() {
             const result = await findAndClickDoneButton(document, 'Main Modal', 15);
 
             if (!result.clicked) {
-              log('⚠️ Done button not found, checking modal status...');
+              log('[WARN] Done button not found, checking modal status...');
               const modal = document.querySelector('.jobs-easy-apply-modal');
               if (modal && modal.offsetParent !== null) {
-                log('⚠️ Modal still open, trying to close it...');
+                log('[WARN] Modal still open, trying to close it...');
                 await discardApplication();
               } else {
-                log('✅ Modal closed during search');
+                log('[OK] Modal closed during search');
               }
             }
 
@@ -1528,19 +1571,19 @@ async function mainLoop() {
             await wait(1500);
             let sentModal = document.querySelector('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal');
             if (sentModal && sentModal.offsetParent !== null) {
-              log('📨 "Application sent" modal detected, clicking Done...');
+              log('[MAIL] "Application sent" modal detected, clicking Done...');
               const sentResult = await findAndClickDoneButton(sentModal, 'Application Sent Modal', 8);
 
               if (!sentResult.clicked) {
-                log('⚠️ Done button not found in sent modal, forcing discard');
+                log('[WARN] Done button not found in sent modal, forcing discard');
                 await discardApplication();
               }
             }
 
-            // Application completed
-            log('✅ Application completed, moving to next job');
-            log('--- End of job processing ---');
-            await wait(500); // Ultra optimized wait before next job
+            // Application completed — anti-ban random delay
+            const delayMs = randomDelayMs(config.minDelay || 3, config.maxDelay || 8);
+            log(`[OK] Application completed. Waiting ${(delayMs / 1000).toFixed(1)}s before next job...`);
+            await wait(delayMs);
             break;
           }
         }
@@ -1548,17 +1591,17 @@ async function mainLoop() {
 
       // Check if bot was stopped during job processing (e.g., daily limit reached)
       if (!isRunning) {
-        log('🛑 Bot stopped during job processing - Exiting main loop');
+        log('[STOP] Bot stopped during job processing - Exiting main loop');
         break; // Exit the while loop
       }
 
       // Page suivante (Python ligne 2047) - IMPROVED WITH FALLBACKS
-      log('🔍 Recherche page suivante...');
+      log('[SCAN] Recherche page suivante...');
       let nextPageClicked = false;
 
       // COLLECTIONS PAGE: Use infinite scroll instead of pagination
       if (isCollectionsPage) {
-        log('📜 Collections page - using infinite scroll');
+        log('[SCROLL] Collections page - using infinite scroll');
 
         // Get the job list container
         const jobListContainer = document.querySelector('.jobs-search-results-list, .scaffold-layout__list-container, .jobs-search-results__list');
@@ -1570,48 +1613,46 @@ async function mainLoop() {
           jobListContainer.scrollTo({ top: jobListContainer.scrollHeight, behavior: 'smooth' });
           window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
 
-          log('📜 Scrolled down to load more jobs...');
+          log('[SCROLL] Scrolled down to load more jobs...');
           await wait(2000);
 
           // Check if new jobs were loaded
           const newJobCount = document.querySelectorAll('li[data-occludable-job-id], .jobs-search-results__list-item, .scaffold-layout__list-item').length;
 
           if (newJobCount > currentJobCount) {
-            log(`✅ Loaded ${newJobCount - currentJobCount} more jobs (total: ${newJobCount})`);
+            log(`[OK] Loaded ${newJobCount - currentJobCount} more jobs (total: ${newJobCount})`);
             nextPageClicked = true;
           } else {
-            log('📋 No more jobs to load (reached end of collection)');
+            log('[INFO] No more jobs to load (reached end of collection)');
           }
         }
       }
 
-      // SEARCH PAGE: Use standard pagination
-      // METHOD 1: Try pagination by page number
-      const pagination = document.querySelector('.jobs-search-pagination__pages');
+      // SEARCH PAGE: pagination — confirmed via Playwright: button[aria-label="Page N"]
+      // Check both main doc and iframe doc
       if (!nextPageClicked) {
-        if (pagination) {
-          const activeBtn = pagination.querySelector('button.active, button[aria-current="true"], li.active button, li.selected button');
-          if (activeBtn) {
-            const currentPage = parseInt(activeBtn.textContent);
-            log(`📄 Page actuelle: ${currentPage}`);
+        const searchDocs2 = [document];
+        const iEl2 = document.querySelector('[data-testid="interop-iframe"]');
+        if (iEl2?.contentDocument) searchDocs2.push(iEl2.contentDocument);
 
-            // Try to find next page button
-            const nextPageBtn = pagination.querySelector(`button[aria-label="Page ${currentPage + 1}"]`) ||
-                               pagination.querySelector(`button[data-test-pagination-page-btn="${currentPage + 1}"]`);
-
-            if (nextPageBtn && nextPageBtn.offsetParent !== null) {
-              log(`✅ Clique sur page ${currentPage + 1}`);
-              await click(nextPageBtn);
-              await wait(1000); // Ultra optimized page load wait
-              nextPageClicked = true;
-            }
+        for (const doc of searchDocs2) {
+          // Find current active page
+          const activeBtn = doc.querySelector('button[aria-current="true"], button.active, li.active button');
+          const currentPage = activeBtn ? parseInt(activeBtn.getAttribute('aria-label')?.replace('Page ','') || activeBtn.textContent) : 1;
+          const nextPageBtn = doc.querySelector(`button[aria-label="Page ${currentPage + 1}"]`);
+          if (nextPageBtn && nextPageBtn.offsetParent !== null) {
+            log(`[OK] Moving to page ${currentPage + 1}`);
+            await click(nextPageBtn);
+            await wait(2000);
+            nextPageClicked = true;
+            break;
           }
         }
       }
 
       // METHOD 2: Try "Next" button (fallback)
       if (!nextPageClicked) {
-        log('🔍 Recherche bouton "Next"...');
+        log('[SCAN] Recherche bouton "Next"...');
         const nextButtons = Array.from(document.querySelectorAll('button, [role="button"]'));
 
         for (let btn of nextButtons) {
@@ -1630,7 +1671,7 @@ async function mainLoop() {
                                     btn.getAttribute('aria-label')?.includes('page');
 
             if (isPaginationNext) {
-              log('✅ Clique sur bouton Next');
+              log('[OK] Clique sur bouton Next');
               await click(btn);
               await wait(1000); // Ultra optimized page load wait
               nextPageClicked = true;
@@ -1644,7 +1685,7 @@ async function mainLoop() {
       if (!nextPageClicked) {
         const iconNextBtn = document.querySelector('.jobs-search-pagination button[aria-label*="Next"], .jobs-search-pagination button svg[class*="chevron-right"]')?.closest('button');
         if (iconNextBtn && iconNextBtn.offsetParent !== null && !iconNextBtn.disabled) {
-          log('✅ Clique sur bouton Next (icône)');
+          log('[OK] Clique sur bouton Next (icône)');
           await click(iconNextBtn);
           await wait(1000); // Ultra optimized page load wait
           nextPageClicked = true;
@@ -1652,10 +1693,10 @@ async function mainLoop() {
       }
 
       if (nextPageClicked) {
-        log('✅ Passage à la page suivante réussi');
+        log('[OK] Passage à la page suivante réussi');
         continue;
       } else {
-        log('📋 Fin des pages - Aucune page suivante trouvée');
+        log('[INFO] Fin des pages - Aucune page suivante trouvée');
         break;
       }
 
@@ -1666,6 +1707,23 @@ async function mainLoop() {
   }
 
   log('Arrêt');
+}
+
+// Skip job if title contains NONE of the required whitelist keywords
+function shouldSkipByTitleFilter(title, titleKeywords) {
+  if (!titleKeywords || titleKeywords.trim() === '') return false;
+
+  const keywords = titleKeywords.toLowerCase().split(',').map(k => k.trim()).filter(k => k);
+  if (keywords.length === 0) return false;
+
+  const titleLower = title.toLowerCase();
+  const hasMatch = keywords.some(kw => titleLower.includes(kw));
+
+  if (!hasMatch) {
+    log(`[SKIP] Title filter: "${title}" contains none of [${keywords.join(', ')}]`);
+    return true;
+  }
+  return false;
 }
 
 // Vérifier si le job contient des mots blacklistés
@@ -1682,7 +1740,7 @@ function shouldSkipByBlacklist(title, company, description, blacklistKeywords) {
   // Check each keyword
   for (let keyword of keywords) {
     if (jobText.includes(keyword)) {
-      log(`⏭️ Skip (Blacklist): "${keyword}" found in job`);
+      log(`[SKIP] Skip (Blacklist): "${keyword}" found in job`);
       log(`   Title: ${title.substring(0, 50)}`);
       return true;
     }
@@ -1736,7 +1794,7 @@ function shouldSkipByExperience(jobCard, maxYearsRequired) {
     const yearsRequired = extractYearsRequired(combinedText);
 
     if (yearsRequired > 0 && yearsRequired > maxYearsRequired) {
-      log(`⏭️ Skip: ${yearsRequired}+ years required (max: ${maxYearsRequired})`);
+      log(`[SKIP] Skip: ${yearsRequired}+ years required (max: ${maxYearsRequired})`);
       return true;
     }
   } catch (error) {
@@ -1786,7 +1844,7 @@ function checkForStuckLoadingPopup() {
     if (loadingIndicators.length > 0) {
       for (let indicator of loadingIndicators) {
         if (indicator.offsetParent !== null) { // Visible
-          log('⚠️ POPUP DE CHARGEMENT DÉTECTÉ ET VISIBLE!');
+          log('[WARN] POPUP DE CHARGEMENT DÉTECTÉ ET VISIBLE!');
           return true;
         }
       }
@@ -1801,14 +1859,14 @@ function checkForStuckLoadingPopup() {
       );
 
       if (clickableButtons.length === 0) {
-        log('⚠️ MODAL FIGÉ DÉTECTÉ (aucun bouton cliquable)!');
+        log('[WARN] MODAL FIGÉ DÉTECTÉ (aucun bouton cliquable)!');
         return true;
       }
     }
 
     return false;
   } catch (error) {
-    log(`⚠️ Erreur lors de la vérification du popup: ${error.message}`);
+    log(`[WARN] Erreur lors de la vérification du popup: ${error.message}`);
     return false;
   }
 }
@@ -1834,6 +1892,265 @@ function saveAppliedJobsToStorage() {
   chrome.storage.local.set({ appliedJobs: appliedJobs });
 }
 
+// ── Apply loop — processedIds + madeProgress mirrors 3/apply.js ──────────────
+async function testStep1_clickEasyApply() {
+  log('[BOT] Starting — target: 2 jobs');
+  await wait(2000);
+
+  const processedIds = new Set();
+  const LIMIT = Math.min(10, Math.max(1, parseInt(config.applyLimit) || 2));
+
+  while (isRunning && appliedCount < LIMIT) {
+
+    // Re-query cards fresh each iteration
+    const iframeDoc = document.querySelector('[data-testid="interop-iframe"]')?.contentDocument;
+    const doc   = iframeDoc || document;
+    const cards = Array.from(doc.querySelectorAll('.display-flex.job-card-container'));
+    log(`[BOT] ${cards.length} cards visible`);
+
+    // Find next unprocessed unapplied card
+    let target = null;
+    for (const card of cards) {
+      const jobId = card.getAttribute('data-job-id')
+        || card.getAttribute('data-occludable-job-id')
+        || card.querySelector('a[href*="/jobs/view/"]')?.href || '';
+      if (!jobId || processedIds.has(jobId)) continue;
+      if (/applied/i.test(card.textContent)) {
+        processedIds.add(jobId);
+        log('  ✓ Already applied — skip');
+        continue;
+      }
+      target = card;
+      processedIds.add(jobId);
+      break;
+    }
+
+    if (!target) { log('[BOT] No more unprocessed jobs visible'); break; }
+
+    // Click title
+    const titleLink = target.querySelector('a[href*="/jobs/view/"], .job-card-list__title');
+    log('[BOT] Clicking job...');
+    if (titleLink) titleLink.click(); else target.click();
+    await wait(3000);
+
+    // Get title
+    const freshIframe = document.querySelector('[data-testid="interop-iframe"]')?.contentDocument;
+    const titleEl = freshIframe?.querySelector('.job-details-jobs-unified-top-card__job-title, .t-24')
+      || document.querySelector('.job-details-jobs-unified-top-card__job-title, .t-24');
+    const title = titleEl?.textContent.trim() || 'Unknown';
+    log(`[BOT] Job: "${title}"`);
+
+    // Find Easy Apply button — retry once
+    let eaBtn = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      for (const d of [document, freshIframe].filter(Boolean)) {
+        const btn = d.querySelector('button[aria-label^="Easy Apply to"]');
+        if (btn && btn.offsetParent) { eaBtn = btn; break; }
+      }
+      if (eaBtn) break;
+      if (attempt === 0) { log('[BOT] Waiting for Easy Apply...'); await wait(2000); }
+    }
+
+    if (!eaBtn) {
+      const visible = [...document.querySelectorAll('button'), ...(freshIframe?.querySelectorAll('button') || [])]
+        .filter(b => b.offsetParent).map(b => b.getAttribute('aria-label') || b.textContent.trim())
+        .filter(Boolean).slice(0, 8);
+      log(`[BOT] [skip:no-easy-apply] "${title}" — buttons: ${visible.join(' | ')}`);
+      skippedCount++; await chrome.storage.local.set({ skippedCount }); sendCounts();
+      continue; // try next card
+    }
+
+    // Click Easy Apply
+    log(`[BOT] Clicking: "${eaBtn.getAttribute('aria-label')}"`);
+    eaBtn.click();
+    await wait(2000);
+
+    if (!testGetModal()) {
+      log(`[BOT] [skip:modal-not-opened] "${title}"`);
+      skippedCount++; await chrome.storage.local.set({ skippedCount }); sendCounts();
+      continue;
+    }
+
+    // Fill and submit
+    log('[BOT] Modal open — filling...');
+    const ok = await testFillAndSubmit(title);
+    if (ok) {
+      appliedCount++;
+      await chrome.storage.local.set({ appliedCount });
+      sendCounts();
+      log(`[BOT] ✓ Applied "${title}" (${appliedCount}/${LIMIT})`);
+    } else {
+      skippedCount++; await chrome.storage.local.set({ skippedCount }); sendCounts();
+      log(`[BOT] ✗ Could not submit "${title}"`);
+    }
+
+    await wait(1500); // pause between jobs
+  }
+
+  log(`[BOT] Done — Applied: ${appliedCount} Skipped: ${skippedCount}`);
+  isRunning = false;
+  await chrome.storage.local.set({ isRunning: false });
+  chrome.runtime.sendMessage({ type: 'updateStatus', status: 'stopped' }).catch(() => {});
+}
+
+function sendCounts() {
+  chrome.runtime.sendMessage({ type: 'updateCount', applied: appliedCount, skipped: skippedCount }).catch(() => {});
+}
+
+function findPageButton(pageNum) {
+  for (const d of [document, document.querySelector('[data-testid="interop-iframe"]')?.contentDocument].filter(Boolean)) {
+    const btn = d.querySelector(`button[aria-label="Page ${pageNum}"]`);
+    if (btn && btn.offsetParent) return btn;
+  }
+  return null;
+}
+
+async function scrollCards() {
+  try {
+    const iframeDoc = document.querySelector('[data-testid="interop-iframe"]')?.contentDocument;
+    const doc  = iframeDoc || document;
+    const list = doc?.querySelector('.jobs-search-results-list, .scaffold-layout__list');
+    if (!list) return;
+    // Scroll down then back up to trigger virtualized list
+    for (let i = 0; i < 8; i++) { list.scrollTop += 400; await wait(150); }
+    for (let i = 0; i < 8; i++) { list.scrollTop -= 400; await wait(100); }
+    await wait(500);
+  } catch (e) { log('[BOT] Scroll skip: ' + e.message); }
+}
+
+function testGetModal() {
+  const m = document.querySelector('.jobs-easy-apply-modal');
+  if (m && m.offsetParent !== null) return m;
+  const iframeDoc = document.querySelector('[data-testid="interop-iframe"]')?.contentDocument;
+  if (iframeDoc) {
+    const mi = iframeDoc.querySelector('.jobs-easy-apply-modal');
+    if (mi && mi.offsetParent !== null) return mi;
+  }
+  return null;
+}
+
+async function testFillAndSubmit(jobTitle = '') {
+  const startTime = Date.now();
+
+  for (let step = 0; step < 15; step++) {
+    if (Date.now() - startTime > 180000) {
+      log(`  [skip:timeout-3min] "${jobTitle}"`);
+      await testDiscard(); return false;
+    }
+
+    const modal = testGetModal();
+    if (!modal) { log(`[TEST] Modal gone at step ${step}`); return step > 0; }
+
+    await wait(600);
+    testFillFields(modal);
+    await wait(500);
+
+    // Button detection by text content
+    const buttons = Array.from(modal.querySelectorAll('button')).filter(b => b.offsetParent);
+    const byText  = t => buttons.find(b => b.textContent.trim().toLowerCase().includes(t.toLowerCase()));
+    const byLabel = t => buttons.find(b => (b.getAttribute('aria-label') || '').toLowerCase().includes(t.toLowerCase()));
+
+    const submitBtn   = byText('Submit application')      || byLabel('Submit application');
+    const reviewBtn   = byText('Review your application') || byLabel('Review');
+    const continueBtn = byText('Continue to next step')   || byLabel('Continue to next step')
+                     || byText('Next')                    || byLabel('Next');
+
+    if (submitBtn) {
+      // Uncheck follow company
+      const followCb = modal.querySelector('#follow-company-checkbox');
+      if (followCb && followCb.checked) {
+        const lbl = modal.querySelector('label[for="follow-company-checkbox"]');
+        if (lbl) lbl.click(); else followCb.click();
+      }
+      log('[TEST] → Submit application');
+      submitBtn.click();
+      await wait(2000);
+
+      // Close post-submit "Application sent" modal
+      const closeTries = [
+        () => document.querySelector('button[aria-label="Done"], button[aria-label="Dismiss"]'),
+        () => Array.from(document.querySelectorAll('button')).find(b => /^(Done|Not now)$/i.test(b.textContent.trim()) && b.offsetParent),
+        () => document.querySelector('.artdeco-modal__dismiss'),
+      ];
+      for (const fn of closeTries) {
+        const btn = fn();
+        if (btn && btn.offsetParent) { btn.click(); await wait(500); log('[TEST] → Closed success modal'); break; }
+      }
+      return true;
+    }
+
+    if (reviewBtn)   { log('[TEST] → Review');   reviewBtn.click();   await wait(800); continue; }
+    if (continueBtn) { log('[TEST] → Continue'); continueBtn.click(); await wait(800); continue; }
+
+    log(`  [skip:no-action-button] "${jobTitle}" at step ${step} — discarding`);
+    await testDiscard(); return false;
+  }
+  await testDiscard(); return false;
+}
+
+function testFillFields(modal) {
+  function fill(el, val) {
+    const s = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    if (s) s.call(el, val);
+    el.dispatchEvent(new Event('input',  { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  const c = config;
+  modal.querySelectorAll('input[type="text"],input[type="email"],input[type="tel"],input[type="number"]').forEach(inp => {
+    if (inp.value) return;
+    const l = [inp.getAttribute('aria-label'), inp.getAttribute('name'),
+      modal.querySelector(`label[for="${inp.id}"]`)?.textContent].join(' ').toLowerCase();
+    if      (l.match(/first.*name/))         fill(inp, c.firstName);
+    else if (l.match(/last.*name/))          fill(inp, c.lastName);
+    else if (l.match(/email/))               fill(inp, c.email);
+    else if (l.match(/phone|mobile/))        fill(inp, c.phone);
+    else if (l.match(/experience|years/))    fill(inp, c.yearsOfExperience || '2');
+    else if (l.match(/salary|compensation/)) fill(inp, c.expectedSalary || '100000');
+    else if (l.match(/city|location/))       fill(inp, c.city);
+  });
+
+  modal.querySelectorAll('fieldset[data-test-form-builder-radio-button-form-component]').forEach(fs => {
+    const q = (fs.querySelector('legend, [class*="title"]')?.textContent || '').toLowerCase();
+    let ans = 'yes';
+    if (q.match(/visa|sponsor/))     ans = c.visaSponsorship    || 'no';
+    if (q.match(/legal|authorized/)) ans = c.legallyAuthorized  || 'yes';
+    if (q.match(/relocat/))          ans = c.willingToRelocate  || 'yes';
+    if (q.match(/clearance/))        ans = 'no';
+    if (q.match(/driver/))           ans = c.driversLicense     || 'no';
+    for (const r of fs.querySelectorAll('input[type="radio"]')) {
+      const lbl = fs.querySelector(`label[for="${r.id}"]`);
+      const t   = (lbl?.textContent || '').trim().toLowerCase();
+      if ((ans === 'yes' && /^(yes|oui)$/.test(t)) || (ans === 'no' && /^(no|non)$/.test(t))) {
+        if (!r.checked) { lbl ? lbl.click() : r.click(); } break;
+      }
+    }
+  });
+
+  modal.querySelectorAll('select').forEach(sel => {
+    if (sel.selectedIndex > 0) return;
+    const first = Array.from(sel.options).find(o => o.value && o.index > 0);
+    if (first) { sel.value = first.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+  });
+
+  modal.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    if (cb.id === 'follow-company-checkbox') return;
+    const lbl = modal.querySelector(`label[for="${cb.id}"]`);
+    if (lbl && /consent|agree|terms|accept/i.test(lbl.textContent) && !cb.checked) lbl.click();
+  });
+}
+
+async function testDiscard() {
+  const tryClick = sel => { const el = document.querySelector(sel); if (el) el.click(); };
+  tryClick('button[aria-label="Dismiss"]');
+  await wait(400);
+  const discard = Array.from(document.querySelectorAll('button')).find(b => /^discard$/i.test(b.textContent.trim()) && b.offsetParent);
+  if (discard) discard.click();
+  await wait(400);
+  tryClick('.artdeco-modal__dismiss');
+  await wait(300);
+}
+
 // Écouter les messages
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // Handle async operations properly
@@ -1842,14 +2159,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.action === 'start') {
         config = await chrome.storage.sync.get([
           'firstName', 'lastName', 'email', 'phone', 'phoneCountryCode',
-          'yearsOfExperience', 'maxYearsRequired', 'blacklistKeywords', 'city', 'country', 'expectedSalary',
-          'visaSponsorship', 'legallyAuthorized', 'willingToRelocate', 'driversLicense'
+          'yearsOfExperience', 'maxYearsRequired', 'titleKeywords', 'blacklistKeywords', 'city', 'country', 'expectedSalary',
+          'visaSponsorship', 'legallyAuthorized', 'willingToRelocate', 'driversLicense',
+          'minDelay', 'maxDelay', 'applyLimit'
         ]);
 
-        // Charger les compteurs depuis storage
-        const local = await chrome.storage.local.get(['appliedCount', 'skippedCount', 'appliedJobs', 'resumeFile', 'resumeFileName', 'resumeFileType']);
-        appliedCount = local.appliedCount || 0;
-        skippedCount = local.skippedCount || 0;
+        // Reset counters on each fresh start
+        const local = await chrome.storage.local.get(['appliedJobs', 'resumeFile', 'resumeFileName', 'resumeFileType']);
+        appliedCount = 0;
+        skippedCount = 0;
+        await chrome.storage.local.set({ appliedCount: 0, skippedCount: 0 });
         appliedJobs = local.appliedJobs || [];
 
         // Load resume data if available
@@ -1858,9 +2177,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         resumeFileType = local.resumeFileType || null;
 
         if (resumeFile) {
-          log(`📄 Resume loaded: ${resumeFileName}`);
+          log(`[FILE] Resume loaded: ${resumeFileName}`);
         } else {
-          log('ℹ️ No resume uploaded - file upload fields will be skipped');
+          log('[INFO] No resume uploaded - file upload fields will be skipped');
         }
 
         log(`Config: ${config.firstName} ${config.lastName}, exp: ${config.yearsOfExperience || 2}, max required: ${config.maxYearsRequired || 3}`);
@@ -1870,8 +2189,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         isRunning = true;
         userExplicitlyClickedStart = true; // CRITICAL: Only set when user clicks Start
 
-        log('✅ Bot started by USER');
-        log('🔒 Security flags set: isRunning=true, userExplicitlyClickedStart=true');
+        log('[OK] Bot started by USER');
+        log('[SEC] Security flags set: isRunning=true, userExplicitlyClickedStart=true');
 
         // Update storage
         await chrome.storage.local.set({ isRunning: true });
@@ -1886,13 +2205,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           // Popup may be closed
         }
 
-        // Start main loop (don't await - let it run in background)
-        mainLoop();
+        // STEP TEST: only click Easy Apply on 1 job, then stop
+        testStep1_clickEasyApply();
       } else if (request.action === 'stop') {
         isRunning = false;
         userExplicitlyClickedStart = false; // Clear security flag
-        log('⏸️ Bot stopped by user');
-        log('🔒 Security flags cleared: isRunning=false, userExplicitlyClickedStart=false');
+        log('[PAUSE] Bot stopped by user');
+        log('[SEC] Security flags cleared: isRunning=false, userExplicitlyClickedStart=false');
 
         // Update storage
         await chrome.storage.local.set({ isRunning: false });
@@ -1919,11 +2238,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       } else if (request.action === 'clearAppliedJobs') {
         appliedJobs = [];
         await chrome.storage.local.set({ appliedJobs: [] });
-        log('🗑️ Applied jobs list cleared');
+        log('[DEL] Applied jobs list cleared');
         sendResponse({ success: true, message: 'Applied jobs cleared' });
       }
     } catch (error) {
-      log(`❌ Message handler error: ${error.message}`);
+      log(`[FAIL] Message handler error: ${error.message}`);
       sendResponse({ success: false, error: error.message });
     }
   })();
@@ -1932,15 +2251,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true;
 });
 
-console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #0a66c2; font-weight: bold;');
-console.log('%c🔒 EASYAPPLYMAX v1.5.0 - MANUAL INJECTION MODE', 'color: #0a66c2; font-weight: bold; font-size: 16px;');
-console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #0a66c2; font-weight: bold;');
-console.log('%c✅ Script injected ONLY when you clicked START', 'color: green; font-weight: bold;');
-console.log('%c🔒 NO automatic loading on LinkedIn pages', 'color: green; font-weight: bold;');
-console.log('%c🚀 Bot will start automatically after injection', 'color: orange; font-weight: bold;');
-console.log('%c📋 Supports: /jobs/search/ AND /jobs/collections/', 'color: cyan; font-weight: bold;');
-console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #0a66c2; font-weight: bold;');
-log('Script loaded v1.5.0 - Supports /jobs/search/ and /jobs/collections/');
+console.log('%c-----------------------------------------------------', 'color: #06b6d4; font-weight: bold;');
+console.log('%c[SEC] APPLYEZEE v1.5.3 - MANUAL INJECTION MODE', 'color: #06b6d4; font-weight: bold; font-size: 16px;');
+console.log('%c-----------------------------------------------------', 'color: #06b6d4; font-weight: bold;');
+console.log('%c[OK] Script injected ONLY when you clicked START', 'color: green; font-weight: bold;');
+console.log('%c[SEC] NO automatic loading on LinkedIn pages', 'color: green; font-weight: bold;');
+console.log('%c[START] Bot will start automatically after injection', 'color: orange; font-weight: bold;');
+console.log('%c[INFO] Supports: /jobs/search/ AND /jobs/collections/', 'color: cyan; font-weight: bold;');
+console.log('%c-----------------------------------------------------', 'color: #06b6d4; font-weight: bold;');
+log('ApplyEzee v1.5.3 loaded - Supports /jobs/search/ and /jobs/collections/');
 
 // SECURITY: Clear ALL running state on page load to prevent auto-start
 // Bot will ONLY start when user explicitly clicks "Start" button
@@ -1959,17 +2278,17 @@ log('Script loaded v1.5.0 - Supports /jobs/search/ and /jobs/collections/');
     skippedCount = state.skippedCount || 0;
     appliedJobs = state.appliedJobs || [];
 
-    console.log('%c⏸️ BOT STATUS: STOPPED (Waiting for START button)', 'background: #ff9800; color: white; font-weight: bold; padding: 4px 8px; border-radius: 3px;');
-    log('ℹ️ Content script loaded - Bot ready (NOT running)');
-    log('🔒 Security initialized: isRunning=false, userExplicitlyClickedStart=false');
-    log(`📊 Current stats: Applied ${appliedCount}, Skipped ${skippedCount}`);
-    log('⏸️ Waiting for user to click START button...');
-    console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #0a66c2; font-weight: bold;');
-    console.log('%c⚠️ IF YOU SEE ANY CLICKS WITHOUT CLICKING START:', 'color: red; font-weight: bold;');
-    console.log('%c   Check console for 🚨 SECURITY VIOLATION errors', 'color: red; font-weight: bold;');
+    console.log('%c[PAUSE] BOT STATUS: STOPPED (Waiting for START button)', 'background: #ff9800; color: white; font-weight: bold; padding: 4px 8px; border-radius: 3px;');
+    log('[INFO] Content script loaded - Bot ready (NOT running)');
+    log('[SEC] Security initialized: isRunning=false, userExplicitlyClickedStart=false');
+    log(`[STATS] Current stats: Applied ${appliedCount}, Skipped ${skippedCount}`);
+    log('[PAUSE] Waiting for user to click START button...');
+    console.log('%c----------------------------------------', 'color: #06b6d4; font-weight: bold;');
+    console.log('%c[WARN] IF YOU SEE ANY CLICKS WITHOUT CLICKING START:', 'color: red; font-weight: bold;');
+    console.log('%c   Check console for [ALERT] SECURITY VIOLATION errors', 'color: red; font-weight: bold;');
     console.log('%c   These will show WHERE the unauthorized click came from', 'color: red; font-weight: bold;');
-    log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    log('----------------------------------------');
   } catch (error) {
-    log(`⚠️ Initialization error: ${error.message}`);
+    log(`[WARN] Initialization error: ${error.message}`);
   }
 })();
