@@ -1892,7 +1892,7 @@ function saveAppliedJobsToStorage() {
   chrome.storage.local.set({ appliedJobs: appliedJobs });
 }
 
-// ── Apply 2 jobs with anti-ban delay between them, then stop ─────────────────
+// ── Apply N jobs (from settings) with anti-ban delay between them, then stop ──
 async function testStep1_clickEasyApply() {
   await chrome.storage.local.set({ isRunning: true, userStopped: true });
   log('[BOT] Start');
@@ -1900,9 +1900,10 @@ async function testStep1_clickEasyApply() {
 
   const TARGET_JOBS  = parseInt(config.applyLimit) || 2;
   const processedIds = new Set();
+  let appliedThisRun = 0;
 
-  for (let jobNum = 1; jobNum <= TARGET_JOBS; jobNum++) {
-    log(`[BOT] ── Job ${jobNum}/${TARGET_JOBS} ──`);
+  while (appliedThisRun < TARGET_JOBS) {
+    log(`[BOT] ── Job ${appliedThisRun + 1}/${TARGET_JOBS} ──`);
 
     // Cards — iframe first (re-query each iteration in case DOM shifted)
     const iframeDoc = document.querySelector('[data-testid="interop-iframe"]')?.contentDocument;
@@ -1949,7 +1950,7 @@ async function testStep1_clickEasyApply() {
       }
       if (!eaBtn) await wait(500);
     }
-    if (!eaBtn) { log('[BOT] Easy Apply not found — skip'); continue; }
+    if (!eaBtn) { log('[BOT] Easy Apply not found — skip'); continue; } // try next card, same slot
 
     log(`[BOT] clicking Easy Apply: "${eaBtn.getAttribute('aria-label')}"`);
     eaBtn.click();
@@ -1957,24 +1958,25 @@ async function testStep1_clickEasyApply() {
     // Poll for modal up to 5s
     let modal = null;
     for (let i = 0; i < 10 && !modal; i++) { await wait(500); modal = testGetModal(); }
-    if (!modal) { log('[BOT] modal did not open — skip'); continue; }
+    if (!modal) { log('[BOT] modal did not open — skip'); continue; } // try next card, same slot
 
     // Fill + submit
     log('[BOT] filling form...');
     const ok = await testFillAndSubmit(title);
 
     if (ok) {
+      appliedThisRun++;
       appliedCount++;
       appliedJobs.push({ title, company, date: new Date().toLocaleDateString() });
       await chrome.storage.local.set({ appliedCount, appliedJobs });
       sendCounts();
-      log(`[BOT] ✓ Applied "${title}" (${appliedCount} total)`);
+      log(`[BOT] ✓ Applied "${title}" (${appliedThisRun}/${TARGET_JOBS})`);
     } else {
       log(`[BOT] ✗ could not submit "${title}"`);
     }
 
-    // Anti-ban delay between jobs (skip after last)
-    if (jobNum < TARGET_JOBS) {
+    // Anti-ban delay between successful applications (skip after last)
+    if (appliedThisRun < TARGET_JOBS) {
       const delay = randomDelayMs(config.minDelay, config.maxDelay);
       const secs  = Math.round(delay / 1000);
       log(`[BOT] waiting ${secs}s before next job...`);
